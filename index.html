@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Worklog</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#F3F5F7">
+<script>
+(function(){var t;try{t=localStorage.getItem('worklog.theme')}catch(e){}
+if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+document.documentElement.dataset.theme=t;})();
+</script>
+<style>
+*{box-sizing:border-box}
+:root{--bg:#F3F5F7;--panel:#fff;--ink:#17212B;--muted:#5B6875;--line:#D3DAE1;--accent:#1B5FAA;--on-accent:#fff;--run:#C94A08;--on-run:#fff;--danger:#B3261E;color-scheme:light}
+[data-theme=dark]{--bg:#12171D;--panel:#1A2129;--ink:#E7ECF0;--muted:#9AA7B4;--line:#2D3742;--accent:#7DB2EE;--on-accent:#0C1722;--run:#FF8B3E;--on-run:#1F1000;--danger:#FF8A80;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.wrap{max-width:600px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+h1{font-size:1.35rem;margin:0 auto 0 0;letter-spacing:-.01em}
+h2{font-size:1rem;margin:28px 0 0}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn{min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel);cursor:pointer}
+.btn.icon{width:44px;padding:0;display:grid;place-items:center}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600}
+.btn.danger{color:var(--danger)}
+label{display:block;font-size:.875rem;color:var(--muted);margin:12px 0 4px}
+input,textarea{width:100%;min-height:44px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+textarea{resize:vertical;min-height:64px}
+.timer{background:var(--panel);border:1px solid var(--line);border-left:6px solid var(--line);border-radius:14px;padding:4px 16px 16px}
+.timer.on{border-left-color:var(--run)}
+.clock{font-size:clamp(3rem,17vw,4.5rem);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em;text-align:center;margin:12px 0 8px}
+.timer.on .clock{color:var(--run)}
+.timer .btn{width:100%;min-height:56px;font-size:1.125rem}
+.timer.on .btn{background:var(--run);color:var(--on-run);border-color:transparent}
+details{margin:16px 0 0;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+summary{padding:14px 16px;min-height:48px;cursor:pointer;font-weight:600}
+details form{padding:0 16px 16px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{color:var(--muted);font-size:.85rem;margin:8px 0 0}
+.day{display:flex;justify-content:space-between;align-items:baseline;margin-top:20px;padding-bottom:6px;border-bottom:2px solid var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.entry{display:flex;gap:12px;width:100%;min-height:56px;padding:12px 0;text-align:left;align-items:flex-start;background:none;border:0;border-bottom:1px solid var(--line);cursor:pointer}
+.entry .main{flex:1;min-width:0}
+.entry .site{font-weight:600}
+.entry .note{color:var(--muted);font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry .when{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.entry .when small{display:block;color:var(--muted)}
+.empty{color:var(--muted);padding:16px 0}
+footer{color:var(--muted);font-size:.875rem;margin:28px 0 48px}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);padding:16px;width:min(92vw,460px)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h3{margin:0 0 4px}
+.actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.actions .btn{flex:1}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.9rem;max-width:90vw;z-index:10}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Worklog</h1>
+    <button class="btn" id="export" type="button">Export CSV</button>
+    <button class="btn icon" id="theme" type="button" aria-label="Switch theme">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
+    </button>
+  </header>
+  <main>
+    <section class="timer" id="timer" aria-label="Timer">
+      <label for="site">Job site</label>
+      <input id="site" autocomplete="off">
+      <label for="desc">Description</label>
+      <textarea id="desc" rows="2"></textarea>
+      <div class="clock" id="clock" role="timer">0:00:00</div>
+      <button class="btn primary" id="toggle" type="button">Start timer</button>
+    </section>
+
+    <details id="manual">
+      <summary>Add entry manually</summary>
+      <form id="mform">
+        <label for="mdate">Date</label>
+        <input type="date" id="mdate" required>
+        <div class="row2">
+          <div><label for="mstart">Start</label><input type="time" id="mstart" required></div>
+          <div><label for="mend">End</label><input type="time" id="mend" required></div>
+        </div>
+        <p class="hint">If the end time is earlier than the start time, the entry ends the next day.</p>
+        <label for="msite">Job site</label>
+        <input id="msite" autocomplete="off" required>
+        <label for="mdesc">Description</label>
+        <textarea id="mdesc" rows="2"></textarea>
+        <button class="btn primary" type="submit" style="width:100%;margin-top:16px">Add entry</button>
+      </form>
+    </details>
+
+    <h2>Entries</h2>
+    <div id="list"></div>
+  </main>
+  <footer id="foot"></footer>
+</div>
+
+<dialog id="editor">
+  <form id="eform">
+    <h3>Edit entry</h3>
+    <label for="esite">Job site</label>
+    <input id="esite" autocomplete="off" required>
+    <label for="edesc">Description</label>
+    <textarea id="edesc" rows="2"></textarea>
+    <label for="estart">Start</label>
+    <input type="datetime-local" id="estart" required>
+    <label for="eend">End</label>
+    <input type="datetime-local" id="eend" required>
+    <div class="actions">
+      <button class="btn primary" type="submit">Save changes</button>
+      <button class="btn" type="button" id="cancel">Cancel</button>
+      <button class="btn danger" type="button" id="delete">Delete entry</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+const K={e:'worklog.entries',r:'worklog.running',t:'worklog.theme',x:'worklog.lastExport'};
+const get=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
+const put=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){toast('Could not save. Browser storage is full or blocked.');return false}};
+let entries=get(K.e,[]),run=get(K.r,null),tick=null,editing=null,tt;
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const hm=d=>`${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const dtl=d=>`${ymd(d)}T${hm(d)}`;
+const mins=(a,b)=>Math.round((b-a)/60000);
+const fmtDur=m=>`${Math.floor(m/60)}:${pad(m%60)}`;
+const hms=ms=>{const s=Math.max(0,Math.floor(ms/1000));return `${Math.floor(s/3600)}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`};
+const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>{t.hidden=true},3500)}
+function bad(el,msg){el.setCustomValidity(msg);el.reportValidity();el.addEventListener('input',()=>el.setCustomValidity(''),{once:true})}
+function h(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n}
+
+function addEntry(site,description,s,e){
+  entries.push({id:uid(),site,description,start:s.toISOString(),end:e.toISOString(),updated:Date.now()});
+  if(!put(K.e,entries)){entries.pop();return false}
+  return true;
+}
+
+/* Timer */
+function clock(){$('#clock').textContent=run?hms(Date.now()-new Date(run.start)):'0:00:00'}
+function paintTimer(){
+  $('#timer').classList.toggle('on',!!run);
+  $('#toggle').textContent=run?'Stop and save':'Start timer';
+  clock();clearInterval(tick);
+  if(run)tick=setInterval(clock,1000);
+}
+function persistRun(){run.site=$('#site').value;run.desc=$('#desc').value;put(K.r,run)}
+['#site','#desc'].forEach(s=>$(s).addEventListener('input',()=>{if(run)persistRun()}));
+$('#toggle').onclick=()=>{
+  if(!run){run={start:new Date().toISOString()};persistRun();paintTimer();return}
+  const site=$('#site').value.trim();
+  if(!site){toast('Enter a job site to save this entry.');$('#site').focus();return}
+  if(!addEntry(site,$('#desc').value.trim(),new Date(run.start),new Date()))return;
+  run=null;localStorage.removeItem(K.r);
+  $('#site').value='';$('#desc').value='';
+  paintTimer();render();toast('Entry saved.');
+};
+
+/* Manual entry */
+$('#mform').onsubmit=ev=>{
+  ev.preventDefault();
+  const site=$('#msite').value.trim();
+  if(!site){bad($('#msite'),'Enter a job site.');return}
+  const d=$('#mdate').value,s=new Date(`${d}T${$('#mstart').value}`),e=new Date(`${d}T${$('#mend').value}`);
+  if(e<=s)e.setDate(e.getDate()+1);
+  if(!addEntry(site,$('#mdesc').value.trim(),s,e))return;
+  $('#msite').value='';$('#mdesc').value='';$('#mstart').value='';$('#mend').value='';
+  render();toast('Entry added.');
+};
+
+/* List */
+function foot(){
+  const x=get(K.x,null);
+  $('#foot').textContent='Entries are stored only in this browser. Export a CSV regularly as a backup. '+(x?'Last export: '+new Date(x).toLocaleDateString():'Not exported yet.');
+}
+function render(){
+  const list=$('#list');list.textContent='';
+  if(!entries.length){list.append(h('p','empty','No entries yet. Start the timer or add one manually.'));foot();return}
+  const sorted=[...entries].sort((a,b)=>new Date(b.start)-new Date(a.start));
+  let day=null,total=0,tspan=null;
+  const flush=()=>{if(tspan)tspan.textContent=fmtDur(total)};
+  for(const e of sorted){
+    const s=new Date(e.start),f=new Date(e.end),k=ymd(s);
+    if(k!==day){
+      flush();day=k;total=0;
+      const head=h('div','day');
+      head.append(h('span',null,s.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'})));
+      tspan=h('span');head.append(tspan);list.append(head);
+    }
+    const m=mins(s,f);total+=m;
+    const b=h('button','entry');b.type='button';
+    const main=h('div','main');main.append(h('div','site',e.site));
+    if(e.description)main.append(h('div','note',e.description));
+    const when=h('div','when',fmtDur(m));when.append(h('small',null,`${hm(s)}\u2013${hm(f)}`));
+    b.append(main,when);b.onclick=()=>openEdit(e.id);list.append(b);
+  }
+  flush();foot();
+}
+
+/* Edit */
+const dlg=$('#editor');
+function openEdit(id){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  editing=id;
+  $('#esite').value=e.site;$('#edesc').value=e.description||'';
+  $('#estart').value=dtl(new Date(e.start));$('#eend').value=dtl(new Date(e.end));
+  dlg.showModal();
+}
+$('#eform').onsubmit=ev=>{
+  ev.preventDefault();
+  const e=entries.find(x=>x.id===editing);if(!e)return;
+  const site=$('#esite').value.trim(),s=new Date($('#estart').value),f=new Date($('#eend').value);
+  if(!site){bad($('#esite'),'Enter a job site.');return}
+  if(isNaN(s)||isNaN(f)||f<=s){bad($('#eend'),'End time must be after start time.');return}
+  Object.assign(e,{site,description:$('#edesc').value.trim(),start:s.toISOString(),end:f.toISOString(),updated:Date.now()});
+  put(K.e,entries);dlg.close();render();toast('Changes saved.');
+};
+$('#cancel').onclick=()=>dlg.close();
+$('#delete').onclick=()=>{
+  if(!confirm('Delete this entry? This cannot be undone.'))return;
+  entries=entries.filter(x=>x.id!==editing);
+  put(K.e,entries);dlg.close();render();toast('Entry deleted.');
+};
+
+/* CSV export */
+$('#export').onclick=()=>{
+  if(!entries.length){toast('Nothing to export yet.');return}
+  const esc=v=>{v=String(v==null?'':v);return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  const rows=[['date','site','start','end','duration','description']];
+  [...entries].sort((a,b)=>new Date(a.start)-new Date(b.start)).forEach(e=>{
+    const s=new Date(e.start),f=new Date(e.end);
+    rows.push([ymd(s),e.site,hm(s),hm(f),fmtDur(mins(s,f)),e.description||'']);
+  });
+  const blob=new Blob(['\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=`worklog-${ymd(new Date())}.csv`;
+  document.body.append(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  put(K.x,Date.now());foot();toast('CSV exported.');
+};
+
+/* Theme */
+const root=document.documentElement,mq=matchMedia('(prefers-color-scheme: dark)');
+const stored=()=>{try{return localStorage.getItem(K.t)}catch(e){return null}};
+function applyTheme(t){
+  root.dataset.theme=t;
+  $('meta[name=theme-color]').content=t==='dark'?'#12171D':'#F3F5F7';
+  $('#theme').setAttribute('aria-label',t==='dark'?'Switch to light theme':'Switch to dark theme');
+}
+$('#theme').onclick=()=>{
+  const t=root.dataset.theme==='dark'?'light':'dark';
+  applyTheme(t);try{localStorage.setItem(K.t,t)}catch(e){}
+};
+mq.addEventListener('change',()=>{if(!stored())applyTheme(mq.matches?'dark':'light')});
+
+/* Init */
+applyTheme(root.dataset.theme);
+$('#mdate').value=ymd(new Date());
+if(run){$('#site').value=run.site||'';$('#desc').value=run.desc||''}
+paintTimer();render();
+document.addEventListener('visibilitychange',clock);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+})();
+</script>
+</body>
+</html>
