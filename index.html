@@ -51,7 +51,7 @@ details form{padding:0 16px 16px}
 .empty{color:var(--muted);padding:16px 0}
 footer{color:var(--muted);font-size:.875rem;margin:28px 0 48px}
 dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);padding:16px;width:min(92vw,460px);max-height:80vh;overflow:auto;margin:0 auto}
-dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog::backdrop{background:rgba(0,0,0,.55)}@media(min-width:700px){dialog{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}}
 dialog h3{margin:0 0 4px}
 .actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
 .actions .btn{flex:1}
