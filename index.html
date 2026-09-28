@@ -50,7 +50,7 @@ details form{padding:0 16px 16px}
 .entry .when small{display:block;color:var(--muted)}
 .empty{color:var(--muted);padding:16px 0}
 footer{color:var(--muted);font-size:.875rem;margin:28px 0 48px}
-dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);padding:16px;width:min(92vw,460px)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);padding:16px;width:min(92vw,460px);max-height:80vh;overflow:auto;margin:0 auto}
 dialog::backdrop{background:rgba(0,0,0,.55)}
 dialog h3{margin:0 0 4px}
 .actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
@@ -101,13 +101,13 @@ dialog h3{margin:0 0 4px}
   <footer id="foot"></footer>
 </div>
 
-<dialog id="editor">
+<dialog id="editor" style="max-height:80vh;overflow:auto">
   <form id="eform">
-    <h3>Edit entry</h3>
+    <h3 style="margin-bottom:8px">Edit entry</h3>
     <label for="esite">Job site</label>
     <input id="esite" autocomplete="off" required>
     <label for="edesc">Description</label>
-    <textarea id="edesc" rows="2"></textarea>
+    <textarea id="edesc" rows="6"></textarea>
     <label for="estart">Start</label>
     <input type="datetime-local" id="estart" required>
     <label for="eend">End</label>
@@ -120,6 +120,30 @@ dialog h3{margin:0 0 4px}
   </form>
 </dialog>
 
+<dialog id="export-dialog">
+  <h3 style="margin:0 0 4px">Export CSV</h3>
+  <p style="margin:0 0 12px;color:var(--muted)">Select entries to include:</p>
+  <div class="actions" id="export-ranges">
+    <button class="btn" type="button" data-range="7">Last 7 days</button>
+    <button class="btn" type="button" data-range="30">Last 30 days</button>
+    <button class="btn" type="button" data-range="custom">Custom range</button>
+  </div>
+  <div id="export-custom" hidden style="margin-top:12px">
+    <div class="row2">
+      <label for="edate-start">From
+        <input type="date" id="edate-start">
+      </label>
+      <label for="edate-end">To
+        <input type="date" id="edate-end">
+      </label>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="export-go">Export</button>
+    <button class="btn" id="export-cancel">Cancel</button>
+  </div>
+</dialog>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script>
@@ -129,7 +153,7 @@ const $=s=>document.querySelector(s);
 const K={e:'worklog.entries',r:'worklog.running',t:'worklog.theme',x:'worklog.lastExport'};
 const get=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const put=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){toast('Could not save. Browser storage is full or blocked.');return false}};
-let entries=get(K.e,[]),run=get(K.r,null),tick=null,editing=null,tt;
+let entries=get(K.e,[]),run=get(K.r,null),tick=null,editing=null,tt,expMode=null;
 const pad=n=>String(n).padStart(2,'0');
 const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const hm=d=>`${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -234,21 +258,57 @@ $('#delete').onclick=()=>{
   put(K.e,entries);dlg.close();render();toast('Entry deleted.');
 };
 
-/* CSV export */
-$('#export').onclick=()=>{
-  if(!entries.length){toast('Nothing to export yet.');return}
-  const esc=v=>{v=String(v==null?'':v);return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+/* CSV export with range selection */
+const exp=$('#export-dialog');
+$('#export').onclick=()=>{exp.showModal()};
+$('#export-cancel').onclick=()=>exp.close();
+
+// Range buttons
+document.querySelectorAll('#export-ranges button[data-range]').forEach(b=>{
+  b.onclick=()=>{
+    expMode=b.dataset.range;
+    $('#export-custom').hidden=(expMode!=='custom');
+    document.querySelectorAll('#export-ranges button').forEach(x=>x.classList.toggle('primary',x===b));
+  };
+});
+
+function filterByRange(ents){
+  const now=new Date();
+  const startOfDay=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  if(expMode==='7'){
+    const from=startOfDay(new Date(now.getTime()-6*86400000));
+    return ents.filter(e=>{const s=new Date(e.start);s.setHours(0,0,0,0);return s>=from});
+  }
+  if(expMode==='30'){
+    const from=startOfDay(new Date(now.getTime()-29*86400000));
+    return ents.filter(e=>{const s=new Date(e.start);s.setHours(0,0,0,0);return s>=from});
+  }
+  if(expMode==='custom'){
+    const f=$('#edate-start').value, t=$('#edate-end').value;
+    if(!f||!t){toast('Select both start and end dates.');return null}
+    return ents.filter(e=>{const s=new Date(e.start);s.setHours(0,0,0,0);return s>=new Date(f)&&s<=new Date(t+'T23:59:59')});
+  }
+  return[...ents];
+}
+
+$('#export-go').onclick=()=>{
+  if(!entries.length){toast('Nothing to export yet.');exp.close();return}
+  const filtered=filterByRange(entries);
+  if(!filtered||!filtered.length){toast('No entries in selected range.');return}
+  const esc=v=>{v=String(v==null?'':v);if(/[",\r\n]/.test(v))return '"'+v.replace(/"/g,'""')+'"';return v};
   const rows=[['date','site','start','end','duration','description']];
-  [...entries].sort((a,b)=>new Date(a.start)-new Date(b.start)).forEach(e=>{
+  filtered.sort((a,b)=>new Date(a.start)-new Date(b.start)).forEach(e=>{
     const s=new Date(e.start),f=new Date(e.end);
     rows.push([ymd(s),e.site,hm(s),hm(f),fmtDur(mins(s,f)),e.description||'']);
   });
   const blob=new Blob(['\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);a.download=`worklog-${ymd(new Date())}.csv`;
+  a.href=URL.createObjectURL(blob);
+  if(expMode==='custom'){a.download=`worklog-${$('#edate-start').value}-${$('#edate-end').value}.csv`}
+  else{a.download=`worklog-last${expMode||'all'}d.csv`};
   document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  put(K.x,Date.now());foot();toast('CSV exported.');
+  put(K.x,Date.now());foot();exp.close();toast('CSV exported.');
 };
 
 /* Theme */
