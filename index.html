@@ -56,6 +56,8 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
 dialog h3{margin:0 0 4px}
 .settings{margin:16px 0 0;font-size:.875rem;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .settings input{width:11ch;min-height:32px;padding:2px 8px;text-transform:uppercase;letter-spacing:.05em;font-variant-numeric:tabular-nums}
+.opt{display:flex;align-items:center;gap:8px;min-height:40px;margin:0;cursor:pointer}
+.opt input{width:20px;min-height:0;accent-color:var(--accent)}
 #editor{height:80vh;height:80dvh}
 #editor[open]{display:flex;flex-direction:column}
 #eform{display:flex;flex-direction:column;flex:1;min-height:0}
@@ -75,6 +77,17 @@ dialog h3{margin:0 0 4px}
     </button>
   </header>
   <p class="settings">Device ID <input id="device" maxlength="10" autocomplete="off" spellcheck="false"></p>
+
+  <details id="data-menu">
+    <summary>Import / restore</summary>
+    <div style="padding:0 16px 16px">
+      <p class="hint" style="margin:12px 0">Restore entries from a previously exported CSV. Existing entries are matched by ID; the newer version (by last-updated time) is kept. Rows with no ID are added as new entries.</p>
+      <label class="opt"><input type="checkbox" id="import-replace"> Replace all existing data instead of merging</label>
+      <p class="hint" id="import-replace-warn" hidden style="color:var(--danger)">This deletes every entry currently on this device before importing. This cannot be undone.</p>
+      <input type="file" id="import-file" accept=".csv,text/csv" style="margin-top:12px">
+    </div>
+  </details>
+
   <main>
     <section class="timer" id="timer" aria-label="Timer">
       <label for="site">Job site</label>
@@ -326,6 +339,103 @@ $('#export-go').onclick=()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   put(K.x,Date.now());foot();exp.close();toast('CSV exported.');
 };
+
+/* Import / restore */
+function parseCSV(text){
+  // Minimal RFC4180 parser: handles quoted fields, embedded commas/newlines, "" escapes.
+  const rows=[];let row=[],field='',i=0,inQ=false;
+  text=text.replace(/^\ufeff/,''); // strip BOM if present
+  while(i<text.length){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){
+        if(text[i+1]==='"'){field+='"';i+=2;continue}
+        inQ=false;i++;continue;
+      }
+      field+=c;i++;continue;
+    }
+    if(c==='"'){inQ=true;i++;continue}
+    if(c===','){row.push(field);field='';i++;continue}
+    if(c==='\r'){i++;continue}
+    if(c==='\n'){row.push(field);rows.push(row);row=[];field='';i++;continue}
+    field+=c;i++;
+  }
+  if(field.length||row.length){row.push(field);rows.push(row)}
+  return rows.filter(r=>!(r.length===1&&r[0]===''));
+}
+
+function parseHM(dateStr,hmStr){
+  const [h,m]=(hmStr||'').split(':').map(Number);
+  const d=new Date(`${dateStr}T00:00:00`);
+  if(isNaN(h)||isNaN(m))return null;
+  d.setHours(h,m,0,0);
+  return d;
+}
+
+function importCSV(text,replace){
+  const rows=parseCSV(text);
+  if(!rows.length)return{ok:false,msg:'File is empty or not a valid CSV.'};
+  const header=rows[0].map(h=>h.trim().toLowerCase());
+  const idx=n=>header.indexOf(n);
+  const iDate=idx('date'),iSite=idx('site'),iStart=idx('start'),iEnd=idx('end'),iDesc=idx('description'),iId=idx('id'),iUpd=idx('updated');
+  if(iDate<0||iSite<0||iStart<0||iEnd<0){
+    return{ok:false,msg:'CSV is missing required columns (date, site, start, end).'};
+  }
+  const incoming=[];
+  for(let r=1;r<rows.length;r++){
+    const c=rows[r];if(!c||!c.length||c.every(v=>v===''))continue;
+    const date=(c[iDate]||'').trim();
+    const s=parseHM(date,c[iStart]),f=parseHM(date,c[iEnd]);
+    if(!date||!s||!f){continue} // skip unreadable row rather than aborting the whole import
+    if(f<=s)f.setDate(f.getDate()+1);
+    const site=(c[iSite]||'').trim();if(!site)continue;
+    const description=iDesc>=0?(c[iDesc]||'').trim():'';
+    let id=iId>=0?(c[iId]||'').trim():'';
+    let updated=iUpd>=0?Date.parse(c[iUpd]):NaN;
+    if(isNaN(updated))updated=Date.now();
+    if(!id)id=uid();
+    incoming.push({id,site,description,start:s.toISOString(),end:f.toISOString(),updated});
+  }
+  if(!incoming.length)return{ok:false,msg:'No readable entries found in that file.'};
+
+  let added=0,updated=0,skipped=0;
+  if(replace){
+    entries=incoming;added=incoming.length;
+  }else{
+    const byId=new Map(entries.map(e=>[e.id,e]));
+    for(const inc of incoming){
+      const existing=byId.get(inc.id);
+      if(!existing){entries.push(inc);byId.set(inc.id,inc);added++}
+      else if(inc.updated>existing.updated){Object.assign(existing,inc);updated++}
+      else{skipped++}
+    }
+  }
+  if(!put(K.e,entries))return{ok:false,msg:'Could not save imported data to this browser.'};
+  return{ok:true,added,updated,skipped,replace};
+}
+
+$('#import-replace').addEventListener('change',function(){
+  $('#import-replace-warn').hidden=!this.checked;
+});
+$('#import-file').addEventListener('change',function(){
+  const file=this.files&&this.files[0];if(!file)return;
+  const replace=$('#import-replace').checked;
+  if(replace&&!confirm('This will delete all entries currently stored on this device and replace them with the file you selected. Continue?')){
+    this.value='';return;
+  }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const res=importCSV(String(reader.result),replace);
+    this.value='';
+    if(!res.ok){toast(res.msg);return}
+    render();
+    toast(res.replace
+      ? `Restored ${res.added} entries.`
+      : `Import done: ${res.added} added, ${res.updated} updated, ${res.skipped} unchanged.`);
+  };
+  reader.onerror=()=>{toast('Could not read that file.');this.value=''};
+  reader.readAsText(file);
+});
 
 /* Theme */
 const root=document.documentElement,mq=matchMedia('(prefers-color-scheme: dark)');
