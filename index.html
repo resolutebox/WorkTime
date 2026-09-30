@@ -160,7 +160,8 @@ dialog h3{margin:0 0 4px}
     </div>
   </div>
   <div class="actions">
-    <button class="btn primary" id="export-go">Export</button>
+    <button class="btn primary" id="export-go">Download</button>
+    <button class="btn" id="export-share" hidden>Share&hellip;</button>
     <button class="btn" id="export-cancel">Cancel</button>
   </div>
 </dialog>
@@ -319,10 +320,10 @@ function filterByRange(ents){
   return[...ents];
 }
 
-$('#export-go').onclick=()=>{
-  if(!entries.length){toast('Nothing to export yet.');exp.close();return}
+function buildExportCSV(){
+  if(!entries.length)return{ok:false,msg:'Nothing to export yet.'};
   const filtered=filterByRange(entries);
-  if(!filtered||!filtered.length){toast('No entries in selected range.');return}
+  if(!filtered||!filtered.length)return{ok:false,msg:'No entries in selected range.'};
   const esc=v=>{v=String(v==null?'':v);if(/[",\r\n]/.test(v))return '"'+v.replace(/"/g,'""')+'"';return v};
   const dev=deviceId();
   const rows=[['date','site','start','end','duration','description','id','device','updated']];
@@ -330,14 +331,45 @@ $('#export-go').onclick=()=>{
     const s=new Date(e.start),f=new Date(e.end);
     rows.push([ymd(s),e.site,hm(s),hm(f),fmtDur(mins(s,f)),e.description||'',e.id,dev,new Date(e.updated).toISOString()]);
   });
-  const blob=new Blob(['\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const csv='\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\r\n');
+  const filename=expMode==='custom'
+    ?`worklog-${dev}-${$('#edate-start').value}-${$('#edate-end').value}.csv`
+    :`worklog-${dev}-last${expMode||'all'}d.csv`;
+  return{ok:true,csv,filename};
+}
+
+$('#export-go').onclick=()=>{
+  const r=buildExportCSV();
+  if(!r.ok){toast(r.msg);if(!entries.length)exp.close();return}
+  const blob=new Blob([r.csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  if(expMode==='custom'){a.download=`worklog-${dev}-${$('#edate-start').value}-${$('#edate-end').value}.csv`}
-  else{a.download=`worklog-${dev}-last${expMode||'all'}d.csv`};
+  a.href=URL.createObjectURL(blob);a.download=r.filename;
   document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   put(K.x,Date.now());foot();exp.close();toast('CSV exported.');
+};
+
+/* Share to WhatsApp (or any app) via the native share sheet */
+function shareSupported(){
+  if(!navigator.share||!navigator.canShare)return false;
+  try{
+    const probe=new File(['a'],'probe.csv',{type:'text/csv'});
+    return navigator.canShare({files:[probe]});
+  }catch(e){return false}
+}
+if(shareSupported())$('#export-share').hidden=false;
+
+$('#export-share').onclick=async()=>{
+  const r=buildExportCSV();
+  if(!r.ok){toast(r.msg);return}
+  const file=new File([r.csv],r.filename,{type:'text/csv'});
+  try{
+    await navigator.share({files:[file],title:'Worklog export'});
+    put(K.x,Date.now());foot();exp.close();
+  }catch(err){
+    if(err && err.name==='AbortError')return; // user cancelled the share sheet, not an error
+    toast('Could not share the file. Try Download instead.');
+  }
 };
 
 /* Import / restore */
