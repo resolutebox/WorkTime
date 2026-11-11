@@ -116,6 +116,24 @@ dialog h3{margin:0 0 4px}
       </form>
     </details>
 
+    <details id="ot-report">
+      <summary>Overtime Report</summary>
+      <div style="padding:0 16px 16px">
+        <p class="hint" style="margin:12px 0">Weekday overtime is time before 08:00 and/or after 17:00, Mon&ndash;Fri. All time on Sat/Sun counts as weekend overtime. Entries spanning midnight are split per calendar day. Totals are summed across all job sites.</p>
+        <div class="row2">
+          <label for="otdate-start">From
+            <input type="date" id="otdate-start">
+          </label>
+          <label for="otdate-end">To
+            <input type="date" id="otdate-end">
+          </label>
+        </div>
+        <label class="opt" style="margin-top:12px"><input type="checkbox" id="ot-split"> Show weekday and weekend overtime separately</label>
+        <button class="btn primary" type="button" id="ot-go" style="width:100%;margin-top:12px">Calculate</button>
+        <div id="ot-result" style="margin-top:16px"></div>
+      </div>
+    </details>
+
     <h2>Entries</h2>
     <div id="list"></div>
   </main>
@@ -194,6 +212,49 @@ function deviceId(){
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>{t.hidden=true},3500)}
 function bad(el,msg){el.setCustomValidity(msg);el.reportValidity();el.addEventListener('input',()=>el.setCustomValidity(''),{once:true})}
 function h(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n}
+
+/* Overtime calculation
+   Splits an entry at each local midnight, then for each day-segment:
+   - Sat/Sun: the whole segment counts as weekend OT.
+   - Mon-Fri: minutes before 08:00 and/or after 17:00 count as weekday OT.
+   Returns {weekday, weekend} in minutes for one entry. */
+function splitAtMidnight(s,e){
+  const segs=[];let cur=new Date(s);
+  while(cur<e){
+    const nextMidnight=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+1,0,0,0,0);
+    const segEnd=nextMidnight<e?nextMidnight:e;
+    segs.push([new Date(cur),new Date(segEnd)]);
+    cur=segEnd;
+  }
+  return segs;
+}
+function entryOT(start,end){
+  const s=new Date(start),e=new Date(end);
+  let weekday=0,weekend=0;
+  for(const [segS,segE] of splitAtMidnight(s,e)){
+    const day=segS.getDay(); // 0=Sun..6=Sat
+    const segMin=mins(segS,segE);
+    if(day===0||day===6){weekend+=segMin;continue}
+    const dayStart=new Date(segS.getFullYear(),segS.getMonth(),segS.getDate(),0,0,0,0);
+    const morningCutoff=new Date(dayStart);morningCutoff.setHours(8,0,0,0);
+    const eveningCutoff=new Date(dayStart);eveningCutoff.setHours(17,0,0,0);
+    if(segS<morningCutoff)weekday+=mins(segS,segE<morningCutoff?segE:morningCutoff);
+    if(segE>eveningCutoff)weekday+=mins(segS>eveningCutoff?segS:eveningCutoff,segE);
+  }
+  return{weekday,weekend};
+}
+function overtimeTotals(ents,fromDate,toDate){
+  // fromDate/toDate are inclusive calendar-day bounds (Date objects at local midnight).
+  const toExclusive=new Date(toDate.getFullYear(),toDate.getMonth(),toDate.getDate()+1,0,0,0,0);
+  let weekday=0,weekend=0;
+  for(const ent of ents){
+    const s=new Date(ent.start);
+    if(s<fromDate||s>=toExclusive)continue; // entry's start date decides which cycle it belongs to
+    const ot=entryOT(ent.start,ent.end);
+    weekday+=ot.weekday;weekend+=ot.weekend;
+  }
+  return{weekday,weekend,total:weekday+weekend};
+}
 
 function addEntry(site,description,s,e){
   entries.push({id:uid(),site,description,start:s.toISOString(),end:e.toISOString(),updated:Date.now()});
@@ -326,10 +387,10 @@ function buildExportCSV(){
   if(!filtered||!filtered.length)return{ok:false,msg:'No entries in selected range.'};
   const esc=v=>{v=String(v==null?'':v);if(/[",\r\n]/.test(v))return '"'+v.replace(/"/g,'""')+'"';return v};
   const dev=deviceId();
-  const rows=[['date','site','start','end','duration','description','id','device','updated']];
+  const rows=[['date','site','start','end','duration','description','id','device','updated','weekday_ot','weekend_ot']];
   filtered.sort((a,b)=>new Date(a.start)-new Date(b.start)).forEach(e=>{
-    const s=new Date(e.start),f=new Date(e.end);
-    rows.push([ymd(s),e.site,hm(s),hm(f),fmtDur(mins(s,f)),e.description||'',e.id,dev,new Date(e.updated).toISOString()]);
+    const s=new Date(e.start),f=new Date(e.end),ot=entryOT(e.start,e.end);
+    rows.push([ymd(s),e.site,hm(s),hm(f),fmtDur(mins(s,f)),e.description||'',e.id,dev,new Date(e.updated).toISOString(),fmtDur(ot.weekday),fmtDur(ot.weekend)]);
   });
   const csv='\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\r\n');
   const filename=expMode==='custom'
@@ -490,6 +551,37 @@ $('#device').addEventListener('change',()=>{
   if(!v)v=deviceId(); // revert to stored value if cleared
   $('#device').value=v;
   try{localStorage.setItem(K.d,v)}catch(e){}
+});
+
+/* Overtime Report */
+function currentOTCycle(){
+  // Cycle runs the 20th of one month to the 19th of the next.
+  const now=new Date();
+  let start=new Date(now.getFullYear(),now.getMonth(),20);
+  if(now.getDate()<20)start=new Date(now.getFullYear(),now.getMonth()-1,20);
+  const end=new Date(start.getFullYear(),start.getMonth()+1,19);
+  return[start,end];
+}
+(function initOTDates(){
+  const[s,e]=currentOTCycle();
+  $('#otdate-start').value=ymd(s);$('#otdate-end').value=ymd(e);
+})();
+$('#ot-go').addEventListener('click',()=>{
+  const fStr=$('#otdate-start').value,tStr=$('#otdate-end').value;
+  const box=$('#ot-result');
+  if(!fStr||!tStr){box.textContent='';toast('Select both a start and end date.');return}
+  const from=new Date(fStr+'T00:00:00'),to=new Date(tStr+'T00:00:00');
+  if(to<from){toast('End date must be on or after the start date.');return}
+  const r=overtimeTotals(entries,from,to);
+  box.textContent='';
+  if($('#ot-split').checked){
+    box.append(h('p',null,`Weekday overtime: ${fmtDur(r.weekday)}`));
+    box.append(h('p',null,`Weekend overtime: ${fmtDur(r.weekend)}`));
+    const t=h('p',null,`Total overtime: ${fmtDur(r.total)}`);t.style.fontWeight='600';box.append(t);
+  }else{
+    const t=h('p',null,`Total overtime: ${fmtDur(r.total)}`);t.style.fontWeight='600';box.append(t);
+  }
+  if(r.total===0)box.append(h('p','hint','No overtime found in this range.'));
 });
 
 /* Init */
